@@ -77,14 +77,21 @@ final class UpstreamTAKClient {
     weak var owner: AppModel?
     private var connection: NWConnection?
     private var retry: DispatchWorkItem?
+    private var material: TAKTLSMaterial?
+
+    func use(_ material: TAKTLSMaterial?) {
+        self.material = material
+    }
+
+    var hasIdentity: Bool { material != nil }
 
     func reconnectIfNeeded() {
-        guard let owner else { return }
-        if owner.engine.wantsUpstreamSocket {
+        let wants = MainActor.assumeIsolated { owner?.engine.wantsUpstreamSocket ?? false }
+        let mode = MainActor.assumeIsolated { owner?.engine.mode }
+        if wants {
             if connection == nil { connect() }
-        } else if connection != nil, !owner.engine.mode.keepsSingleITAKServer || owner.engine.mode != .bridging {
-            // Keep the socket only while the engine wants it.
-            if !owner.engine.wantsUpstreamSocket && owner.engine.mode != .bridging {
+        } else if connection != nil, mode?.keepsSingleITAKServer == false || mode != .bridging {
+            if !wants && mode != .bridging {
                 cancel()
             }
         }
@@ -96,32 +103,70 @@ final class UpstreamTAKClient {
     }
 
     private func connect() {
-        guard let owner, let upstream = owner.engine.config.upstream, upstream.isConfigured else { return }
-        let host = NWEndpoint.Host(upstream.host)
-        guard let port = NWEndpoint.Port(rawValue: UInt16(upstream.port)) else { return }
+        let target: (host: String, port: UInt16, tls: Bool)? = MainActor.assumeIsolated {
+            guard let owner, let upstream = owner.engine.config.upstream, upstream.isConfigured else { return nil }
+            guard let port = UInt16(exactly: upstream.port) else { return nil }
+            return (upstream.host, port, upstream.transport == .tls)
+        }
+        guard let target else { return }
+        if target.tls, material == nil {
+            MainActor.assumeIsolated { owner?.noteUpstreamLink(.noCertificate) }
+            return
+        }
+        let host = NWEndpoint.Host(target.host)
+        guard let port = NWEndpoint.Port(rawValue: target.port) else { return }
         let parameters: NWParameters
-        if upstream.transport == .tls {
-            let tls = NWProtocolTLS.Options()
-            parameters = NWParameters(tls: tls)
+        if target.tls, let material {
+            parameters = TAKTLS.parameters(host: target.host, material: material)
         } else {
             parameters = NWParameters.tcp
         }
         let connection = NWConnection(host: host, port: port, using: parameters)
         self.connection = connection
+        MainActor.assumeIsolated { owner?.noteUpstreamLink(.connecting) }
         connection.stateUpdateHandler = { [weak self] state in
             switch state {
             case .ready:
                 self?.owner?.upstreamReady()
+                self?.owner?.noteUpstreamLink(.connected)
                 self?.receive()
-            case .failed, .cancelled:
+            case .failed(let error):
+                self?.fail(error)
+            case .waiting(let error):
+                let link = Self.classify(error)
+                self?.owner?.noteUpstreamLink(link)
+            case .cancelled:
                 self?.connection = nil
                 self?.owner?.upstreamFailed()
                 self?.scheduleRetry()
-            default:
+            case .preparing:
+                self?.owner?.noteUpstreamLink(.connecting)
+            case .setup:
+                break
+            @unknown default:
                 break
             }
         }
         connection.start(queue: .main)
+    }
+
+    private func fail(_ error: NWError) {
+        let link = Self.classify(error)
+        connection = nil
+        owner?.noteUpstreamLink(link)
+        owner?.upstreamFailed()
+        if link != .certificateRejected {
+            scheduleRetry()
+        }
+    }
+
+    private static func classify(_ error: NWError) -> UpstreamLink {
+        switch error {
+        case .tls:
+            return .certificateRejected
+        default:
+            return .unreachable
+        }
     }
 
     private func receive() {
@@ -140,7 +185,8 @@ final class UpstreamTAKClient {
     }
 
     private func scheduleRetry() {
-        guard let owner, let when = owner.engine.nextUpstreamAttempt else { return }
+        let when: Date? = MainActor.assumeIsolated { owner?.engine.nextUpstreamAttempt }
+        guard let when else { return }
         retry?.cancel()
         let delay = max(0.2, when.timeIntervalSinceNow)
         let work = DispatchWorkItem { [weak self] in self?.connect() }

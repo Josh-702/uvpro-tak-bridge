@@ -264,7 +264,58 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(imported.transport, .tls)
         XCTAssertEqual(imported.trustStore, Data([0x01, 0x02, 0x03]))
         XCTAssertEqual(imported.trustStorePassword, "test-password")
+        XCTAssertEqual(imported.resolvedTrustStorePassword, "test-password")
+        XCTAssertEqual(imported.resolvedClientPassword, "test-password")
         XCTAssertFalse(imported.redactedDescription.contains("test-password"))
+        XCTAssertFalse(imported.redactedDescription.contains(TAKPackageImport.defaultCertificatePassword))
+    }
+
+    func testPackagePrefPasswordsAndConnectString() throws {
+        let pref = """
+        <preferences><preference name="cot_streams">
+        <entry key="connectString0" class="class java.lang.String">127.0.0.1:8089:ssl</entry>
+        <entry key="connectString1" class="class java.lang.String">tak.example.org:8089:ssl</entry>
+        <entry key="caPassword0" class="class java.lang.String">trust-secret</entry>
+        <entry key="clientPassword0" class="class java.lang.String">client-secret</entry>
+        <entry key="caLocation0" class="class java.lang.String">certs/truststore.p12</entry>
+        <entry key="certificateLocation0" class="class java.lang.String">certs/client.p12</entry>
+        </preference></preferences>
+        """
+        let zip = ZipArchive.archive([
+            "MANIFEST/manifest.xml": Data("<MissionPackageManifest/>".utf8),
+            "prefs/cot_streams.pref": Data(pref.utf8),
+            "certs/truststore.p12": Data([0x0A]),
+            "certs/client.p12": Data([0x0B]),
+        ])
+        let imported = try TAKPackageImport.load(zip)
+        XCTAssertEqual(imported.host, "tak.example.org")
+        XCTAssertEqual(imported.port, 8089)
+        XCTAssertEqual(imported.transport, .tls)
+        XCTAssertEqual(imported.trustStore, Data([0x0A]))
+        XCTAssertEqual(imported.clientCertificate, Data([0x0B]))
+        XCTAssertEqual(imported.trustStorePassword, "trust-secret")
+        XCTAssertEqual(imported.clientPassword, "client-secret")
+        XCTAssertEqual(imported.resolvedClientPassword, "client-secret")
+        XCTAssertFalse(imported.redactedDescription.contains("trust-secret"))
+        XCTAssertFalse(imported.redactedDescription.contains("client-secret"))
+
+        let bare = """
+        <entry key="connectString0" class="class java.lang.String">tak.example.org:8089:ssl</entry>
+        """
+        let bareZip = ZipArchive.archive([
+            "prefs/cot_streams.pref": Data(bare.utf8),
+            "truststore-ca.p12": Data([0x01]),
+        ])
+        let omitted = try TAKPackageImport.load(bareZip)
+        XCTAssertNil(omitted.trustStorePassword)
+        XCTAssertNil(omitted.clientPassword)
+        XCTAssertEqual(omitted.resolvedTrustStorePassword, TAKPackageImport.defaultCertificatePassword)
+        XCTAssertEqual(omitted.resolvedClientPassword, TAKPackageImport.defaultCertificatePassword)
+        XCTAssertFalse(omitted.redactedDescription.contains(TAKPackageImport.defaultCertificatePassword))
+
+        XCTAssertThrowsError(try TAKPackageImport.load(ZipArchive.archive(["readme.txt": Data("no server".utf8)]))) { error in
+            XCTAssertEqual(error as? TAKImportError, .noConnectString)
+        }
     }
 
     private func parseInfo(_ text: String) -> APRSBody {

@@ -29,6 +29,9 @@ final class AppModel: NSObject, ObservableObject, CLLocationManagerDelegate {
     @Published var allowThirdParty = false
     @Published var localConnect = LocalTAKEndpoint().connectString
     @Published var importNote = ""
+    @Published var upstreamLink = UpstreamLink.noServer
+    @Published var needsCertificatePassword = false
+    @Published var certificatePassword = ""
     @Published var refusals: [String] = []
 
     let engine: BridgeEngine
@@ -63,6 +66,7 @@ final class AppModel: NSObject, ObservableObject, CLLocationManagerDelegate {
         localServer.owner = self
         upstream.owner = self
         paths.owner = self
+        restoreCertificates()
         location.delegate = self
         location.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
         location.pausesLocationUpdatesAutomatically = false
@@ -103,7 +107,7 @@ final class AppModel: NSObject, ObservableObject, CLLocationManagerDelegate {
                 host: host,
                 port: Int(upstreamPort) ?? 8089,
                 transport: upstreamTLS ? .tls : .tcp,
-                hasClientIdentity: engine.config.upstream?.hasClientIdentity ?? false
+                hasClientIdentity: upstream.hasIdentity
             )
         }
         engine.config = config
@@ -151,38 +155,69 @@ final class AppModel: NSObject, ObservableObject, CLLocationManagerDelegate {
             upstreamHost = imported.host
             upstreamPort = String(imported.port)
             upstreamTLS = imported.transport == .tls
-            if let trust = imported.trustStore {
-                let url = configURL.deletingLastPathComponent().appendingPathComponent("upstream-trust.p12")
-                try trust.write(to: url, options: .completeFileProtection)
-            }
-            if let client = imported.clientCertificate {
-                let url = configURL.deletingLastPathComponent().appendingPathComponent("upstream-client.p12")
-                try client.write(to: url, options: .completeFileProtection)
-            }
+            forgetCertificateFiles()
+            storePackage(imported)
             importNote = imported.redactedDescription
+            if !applyStoredCertificates(
+                clientPassword: imported.resolvedClientPassword,
+                trustPassword: imported.resolvedTrustStorePassword
+            ) {
+                needsCertificatePassword = true
+                upstreamLink = .passwordNeeded
+                importNote = "The certificate password was not accepted. Enter the password from the data package."
+            } else {
+                needsCertificatePassword = false
+                certificatePassword = ""
+            }
             saveSettings()
         } catch {
             importNote = "That package did not contain a server address."
         }
     }
 
-    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
-        if manager.authorizationStatus == .authorizedAlways {
-            manager.allowsBackgroundLocationUpdates = true
+    func unlockCertificates() {
+        let password = certificatePassword
+        guard !password.isEmpty else { return }
+        if applyStoredCertificates(clientPassword: password, trustPassword: password) {
+            needsCertificatePassword = false
+            certificatePassword = ""
+            importNote = "Certificates unlocked. Password stored in the Keychain."
+            saveSettings()
+        } else {
+            needsCertificatePassword = true
+            upstreamLink = .passwordNeeded
+            importNote = "That password did not unlock the certificates."
         }
     }
 
-    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+    nonisolated func noteUpstreamLink(_ link: UpstreamLink) {
+        MainActor.assumeIsolated {
+            self.upstreamLink = link
+        }
+    }
+
+    nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        MainActor.assumeIsolated {
+            if manager.authorizationStatus == .authorizedAlways {
+                manager.allowsBackgroundLocationUpdates = true
+            }
+        }
+    }
+
+    nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let fix = locations.last, fix.horizontalAccuracy >= 0 else { return }
         let speedKnots = fix.speed >= 0 ? fix.speed * 1.94384 : 0
         let course = fix.course >= 0 ? fix.course : nil
-        apply(engine.updateOwnPosition(PositionFix(
+        let position = PositionFix(
             latitude: fix.coordinate.latitude,
             longitude: fix.coordinate.longitude,
             courseDegrees: course,
             speedKnots: speedKnots,
             timestamp: fix.timestamp
-        ), now: Date()))
+        )
+        MainActor.assumeIsolated {
+            self.apply(self.engine.updateOwnPosition(position, now: Date()))
+        }
     }
 
     /// Bluetooth and Network callbacks are scheduled on the main queue, but those
@@ -268,6 +303,78 @@ final class AppModel: NSObject, ObservableObject, CLLocationManagerDelegate {
         upstreamPort = String(config.upstream?.port ?? 8089)
         upstreamTLS = config.upstream?.transport != .tcp
         refreshLists()
+    }
+
+    private func restoreCertificates() {
+        guard applyStoredCertificates(
+            clientPassword: TAKCredentialStore.loadPassword(account: TAKCredentialStore.clientPassword) ?? "",
+            trustPassword: TAKCredentialStore.loadPassword(account: TAKCredentialStore.trustStorePassword) ?? ""
+        ) else {
+            if TAKCredentialStore.load(account: TAKCredentialStore.clientCertificate) != nil {
+                needsCertificatePassword = true
+                upstreamLink = .passwordNeeded
+            }
+            return
+        }
+        needsCertificatePassword = false
+    }
+
+    private func storePackage(_ imported: ImportedTAKServer) {
+        if let client = imported.clientCertificate {
+            _ = TAKCredentialStore.save(account: TAKCredentialStore.clientCertificate, data: client)
+        }
+        if let trust = imported.trustStore {
+            _ = TAKCredentialStore.save(account: TAKCredentialStore.trustStore, data: trust)
+        }
+    }
+
+    @discardableResult
+    private func applyStoredCertificates(clientPassword: String, trustPassword: String) -> Bool {
+        let clientData = TAKCredentialStore.load(account: TAKCredentialStore.clientCertificate)
+        let trustData = TAKCredentialStore.load(account: TAKCredentialStore.trustStore)
+        guard clientData != nil || trustData != nil else {
+            upstream.use(nil)
+            return true
+        }
+        guard let clientData else {
+            upstream.use(nil)
+            return false
+        }
+        guard let unlockedClient = TAKPKCS12.unlock(clientData, password: clientPassword),
+              let identity = unlockedClient.identity
+        else {
+            upstream.use(nil)
+            return false
+        }
+        _ = TAKCredentialStore.savePassword(account: TAKCredentialStore.clientPassword, password: clientPassword)
+        var anchors: [SecCertificate] = []
+        if let trustData {
+            guard let unlockedTrust = TAKPKCS12.unlock(trustData, password: trustPassword) else {
+                upstream.use(nil)
+                return false
+            }
+            anchors = unlockedTrust.certificates
+            _ = TAKCredentialStore.savePassword(account: TAKCredentialStore.trustStorePassword, password: trustPassword)
+        }
+        if anchors.isEmpty {
+            var certificate: SecCertificate?
+            if SecIdentityCopyCertificate(identity, &certificate) == errSecSuccess, let certificate {
+                anchors = [certificate]
+            }
+        }
+        guard !anchors.isEmpty else {
+            upstream.use(nil)
+            return false
+        }
+        upstream.use(TAKTLSMaterial(identity: identity, anchors: anchors))
+        return true
+    }
+
+    private func forgetCertificateFiles() {
+        let directory = configURL.deletingLastPathComponent()
+        for name in ["upstream-trust.p12", "upstream-client.p12"] {
+            try? FileManager.default.removeItem(at: directory.appendingPathComponent(name))
+        }
     }
 
     private func persistSnapshot() {

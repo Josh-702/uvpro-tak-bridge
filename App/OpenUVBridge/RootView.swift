@@ -218,6 +218,8 @@ struct SettingsView: View {
                 }
             }
             Section("Your TAK server") {
+                Text(model.upstreamLink.label)
+                    .font(.body.monospaced())
                 TextField("Host", text: $model.upstreamHost)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -227,7 +229,11 @@ struct SettingsView: View {
                 Toggle("Show the whole server map", isOn: $model.mirrorServer)
                 Text("iTAK does not get this address. The bridge uses it when the phone can reach it, and queues when it cannot.")
                     .font(.footnote)
-                Button("Import enrollment package") { importing = true }
+                Button("Import data package") { importing = true }
+                if model.needsCertificatePassword {
+                    SecureField("Certificate password", text: $model.certificatePassword)
+                    Button("Unlock certificates") { model.unlockCertificates() }
+                }
                 if !model.importNote.isEmpty {
                     Text(model.importNote).font(.footnote)
                 }
@@ -258,7 +264,10 @@ struct SettingsView: View {
         .onChange(of: model.mirrorServer) { _, _ in model.saveSettings() }
         .onChange(of: model.allowThirdParty) { _, _ in model.saveSettings() }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.zip]) { result in
-            if case .success(let url) = result, let data = try? Data(contentsOf: url) {
+            guard case .success(let url) = result else { return }
+            let accessed = url.startAccessingSecurityScopedResource()
+            defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+            if let data = try? Data(contentsOf: url) {
                 model.importServerPackage(data)
             }
         }

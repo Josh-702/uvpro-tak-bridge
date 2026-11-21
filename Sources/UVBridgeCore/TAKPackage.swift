@@ -97,17 +97,32 @@ public struct ImportedTAKServer: Equatable {
     public var transport: TAKTransport
     public var clientCertificate: Data?
     public var trustStore: Data?
+    /// Password from the package for the truststore, when the pref had one.
     public var trustStorePassword: String?
+    /// Password from the package for the client certificate, when the pref had one.
+    public var clientPassword: String?
+
+    /// Truststore password, or the ATAK package default when the pref omitted it.
+    public var resolvedTrustStorePassword: String {
+        trustStorePassword ?? TAKPackageImport.defaultCertificatePassword
+    }
+
+    /// Client password, then the truststore password, then the ATAK package default.
+    public var resolvedClientPassword: String {
+        clientPassword ?? trustStorePassword ?? TAKPackageImport.defaultCertificatePassword
+    }
 
     public var redactedDescription: String {
         let trust = trustStore == nil ? "no truststore" : "truststore present"
         let client = clientCertificate == nil ? "no client certificate" : "client certificate present"
-        let password = trustStorePassword == nil ? "no password" : "password redacted"
-        return "\(host):\(port) \(transport.rawValue), \(client), \(trust), \(password)"
+        return "\(host):\(port) \(transport.rawValue), \(client), \(trust), password redacted"
     }
 }
 
 public enum TAKPackageImport {
+    /// Password ATAK writes into a data package when the operator does not choose one.
+    public static let defaultCertificatePassword = "atakatak"
+
     public static func load(_ data: Data) throws -> ImportedTAKServer {
         let files = try ZipArchive.extract(data)
         var texts: [String] = []
@@ -126,15 +141,13 @@ public enum TAKPackageImport {
         }
         var trust: Data?
         var client: Data?
-        var password: String?
+        let trustPassword = firstPassword(named: ["caPassword0", "caPassword"], in: texts)
+        let clientPassword = firstPassword(named: ["clientPassword0", "clientPassword"], in: texts)
         for text in texts {
-            if let found = firstEntry(named: "caPassword0", in: text) {
-                password = found
-            }
-            if let location = firstEntry(named: "caLocation0", in: text) {
+            if let location = firstEntry(named: "caLocation0", in: text) ?? firstEntry(named: "caLocation", in: text) {
                 trust = certificates.first(where: { location.hasSuffix($0.name) || $0.name.hasSuffix(location) })?.data ?? trust
             }
-            if let location = firstEntry(named: "certificateLocation0", in: text) {
+            if let location = firstEntry(named: "certificateLocation0", in: text) ?? firstEntry(named: "certificateLocation", in: text) {
                 client = certificates.first(where: { location.hasSuffix($0.name) || $0.name.hasSuffix(location) })?.data ?? client
             }
         }
@@ -150,8 +163,20 @@ public enum TAKPackageImport {
             transport: chosen.transport,
             clientCertificate: client,
             trustStore: trust,
-            trustStorePassword: password
+            trustStorePassword: trustPassword,
+            clientPassword: clientPassword
         )
+    }
+
+    private static func firstPassword(named keys: [String], in texts: [String]) -> String? {
+        for text in texts {
+            for key in keys {
+                if let found = firstEntry(named: key, in: text) {
+                    return found
+                }
+            }
+        }
+        return nil
     }
 
     private static func findConnectStrings(in text: String) -> [(host: String, port: Int, transport: TAKTransport)] {
