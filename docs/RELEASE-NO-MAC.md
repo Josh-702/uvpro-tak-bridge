@@ -31,6 +31,8 @@ Write down two things from [https://developer.apple.com/account](https://develop
 5. SKU: `openuvbridge`. User access: full.
 6. Click **Create**. You do not fill in screenshots yet.
 
+The GitHub Actions workflow also registers this bundle ID and app record if they are missing. The API key needs permission to create apps. Admin can. App Manager often cannot.
+
 ## 3. Create an App Store Connect API key
 
 This key is how the cloud Mac talks to Apple. It replaces logging in on a Mac.
