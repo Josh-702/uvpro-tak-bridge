@@ -450,10 +450,56 @@ class RadioBridge {
         return null
     }
 
+    fun ingestServerXml(xml: String): List<String> {
+        val delivered = ArrayList<String>()
+        var rest = xml
+        while (true) {
+            val start = rest.indexOf("<event")
+            val end = rest.indexOf("</event>")
+            if (start < 0 || end < start) break
+            val event = rest.substring(start, end + "</event>".length)
+            rest = rest.substring(end + "</event>".length)
+            val uid = attr(event, "uid") ?: continue
+            val type = attr(event, "type") ?: continue
+            val lat = attr(event, "lat")?.toDoubleOrNull() ?: continue
+            val lon = attr(event, "lon")?.toDoubleOrNull() ?: continue
+            val callsign = attr(event, "callsign") ?: uid.removePrefix("APRS-")
+            if (uid.startsWith("GeoChat.")) {
+                if (stations.keys.any { uid.contains(it) } || mirrorServer) delivered.add(event)
+                continue
+            }
+            val before = stations.size
+            noteServerStation(uid, callsign, lat, lon, textBetween(event, "remarks"), type)
+            if (stations.size == before || stations[uid]?.sources?.contains("rf") == true || mirrorServer) {
+                if (stations.containsKey(uid)) delivered.add(event)
+            }
+        }
+        return delivered
+    }
+
     fun flushUpstream(): List<String> {
         if (!(pathUp && serverUp)) return emptyList()
         val copy = upstreamQueue.toList()
         upstreamQueue.clear()
         return copy
+    }
+
+    private fun attr(xml: String, name: String): String? {
+        val key = "$name=\""
+        val start = xml.indexOf(key)
+        if (start < 0) return null
+        val from = start + key.length
+        val end = xml.indexOf('"', from)
+        if (end < 0) return null
+        return xml.substring(from, end)
+    }
+
+    private fun textBetween(xml: String, tag: String): String {
+        val open = "<$tag>"
+        val close = "</$tag>"
+        val start = xml.indexOf(open)
+        val end = xml.indexOf(close)
+        if (start < 0 || end < start) return ""
+        return xml.substring(start + open.length, end)
     }
 }

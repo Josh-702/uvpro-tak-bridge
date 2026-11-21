@@ -131,5 +131,11 @@ class SharedVectorTest {
         bridge.callsign = ""
         assertEquals("callsignNotSet", bridge.operatorMessage("N0CALL", "hi"))
         assertTrue(bridge.txLog.isEmpty())
+        val echoed = bridge.ingestServerXml(json.getJSONObject("position").getString("cotXml"))
+        assertEquals(1, bridge.stations.size)
+        assertEquals(1, echoed.size)
+        val stranger = json.getJSONObject("position").getString("cotXml").replace("APRS-N0CALL", "APRS-W1AW").replace("N0CALL", "W1AW")
+        assertTrue(bridge.ingestServerXml(stranger).isEmpty())
+        assertEquals(1, bridge.stations.size)
     }
 }

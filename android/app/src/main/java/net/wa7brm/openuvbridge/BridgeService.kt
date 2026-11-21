@@ -119,9 +119,18 @@ class BridgeService : Service() {
                         socket.getOutputStream().write(xml.toByteArray())
                     }
                     val buffer = ByteArray(8192)
+                    val pending = StringBuilder()
                     while (running && !socket.isClosed) {
                         val n = socket.getInputStream().read(buffer)
                         if (n < 0) break
+                        pending.append(String(buffer, 0, n))
+                        val text = pending.toString()
+                        val cut = text.lastIndexOf("</event>")
+                        if (cut >= 0) {
+                            val chunk = text.substring(0, cut + "</event>".length)
+                            pending.delete(0, cut + "</event>".length)
+                            for (xml in Session.bridge.ingestServerXml(chunk)) Session.publish(xml)
+                        }
                     }
                 } catch (_: Exception) {
                     Session.bridge.serverUp = false
