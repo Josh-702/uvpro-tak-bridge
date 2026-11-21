@@ -4,94 +4,87 @@
 package net.wa7brm.openuvbridge
 
 import android.Manifest
-import android.bluetooth.BluetoothManager
-import android.bluetooth.le.ScanCallback
-import android.bluetooth.le.ScanFilter
-import android.bluetooth.le.ScanResult
-import android.bluetooth.le.ScanSettings
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import android.os.ParcelUuid
-import android.view.View
+import android.os.Handler
+import android.os.Looper
+import android.widget.Button
+import android.widget.EditText
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import java.io.File
-import java.util.UUID
 
 class MainActivity : AppCompatActivity() {
-    private lateinit var status: TextView
-    private lateinit var stations: TextView
-    private lateinit var log: TextView
-    private val lines = ArrayList<String>()
+    private val main = Handler(Looper.getMainLooper())
+    private lateinit var radio: RadioHub
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { scan() }
-
-    private val scanCallback = object : ScanCallback() {
-        override fun onScanResult(callbackType: Int, result: ScanResult) {
-            val name = result.device.name ?: "KISS TNC"
-            note("Heard $name ${result.rssi} dBm")
-        }
-    }
+    ) { radio.scanBle() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-        status = findViewById(R.id.status)
-        stations = findViewById(R.id.stations)
-        log = findViewById(R.id.log)
-        val mode = BridgeCore.mode(pathUp = false, serverConfigured = false, serverUp = false)
-        status.text = BridgeCore.modeSummary(mode)
-        stations.text = "No stations yet. Connect a BLE KISS radio, or wait for your TAK server while you are online."
-        findViewById<View>(R.id.share).setOnClickListener { sharePackage() }
-        findViewById<View>(R.id.scan).setOnClickListener { ensureScan() }
+        val status = findViewById<TextView>(R.id.status)
+        val stations = findViewById<TextView>(R.id.stations)
+        val log = findViewById<TextView>(R.id.log)
+        val callsign = findViewById<EditText>(R.id.callsign)
+        radio = RadioHub(this, onFrame = { payload ->
+            val ax = OnAir.ax25Decode(payload) ?: return@RadioHub
+            val xml = Session.bridge.ingest(ax, System.currentTimeMillis() / 1000)
+            Session.publish(xml)
+        }, onStatus = { line ->
+            main.post { log.text = line + "\n" + (log.text ?: "") }
+        })
+        Session.listener = {
+            main.post {
+                status.text = BridgeCore.modeSummary(Session.bridge.mode())
+                stations.text = if (Session.bridge.stations.isEmpty()) {
+                    "No stations yet. An iPhone running Open UV Bridge will show up here under the same APRS callsign."
+                } else {
+                    Session.bridge.stations.values.joinToString("\n") { station ->
+                        "${station.callsign}  ${"%.5f".format(station.latitude)}, ${"%.5f".format(station.longitude)}  ${station.sources.joinToString("+")}\n${station.comment}"
+                    }
+                }
+            }
+        }
+        callsign.setText(Session.bridge.callsign)
+        callsign.setOnFocusChangeListener { _, _ ->
+            val parts = callsign.text.toString().trim().uppercase().split("-")
+            Session.bridge.callsign = parts.firstOrNull().orEmpty()
+            Session.bridge.ssid = parts.getOrNull(1)?.toIntOrNull() ?: 0
+        }
+        findViewById<Button>(R.id.share).setOnClickListener { sharePackage() }
+        findViewById<Button>(R.id.scan).setOnClickListener { ensureScan() }
+        findViewById<Button>(R.id.spp).setOnClickListener {
+            val device = radio.bonded().firstOrNull()
+            if (device == null) log.text = "No bonded radio. Pair it in Android settings, or use BLE."
+            else radio.connectSpp(device)
+        }
         startService(Intent(this, BridgeService::class.java))
+        Session.listener?.invoke()
     }
 
     private fun ensureScan() {
         val needed = mutableListOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_SCAN)
-        if (Build.VERSION.SDK_INT < 31) {
-            needed += Manifest.permission.ACCESS_FINE_LOCATION
-        }
-        val missing = needed.filter {
-            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
-        }
-        if (missing.isEmpty()) scan() else permissionLauncher.launch(missing.toTypedArray())
-    }
-
-    private fun scan() {
-        val manager = getSystemService(BluetoothManager::class.java) ?: return
-        val scanner = manager.adapter?.bluetoothLeScanner ?: run {
-            note("Bluetooth is off")
-            return
-        }
-        val filter = ScanFilter.Builder()
-            .setServiceUuid(ParcelUuid(UUID.fromString(BridgeCore.kissService)))
-            .build()
-        scanner.startScan(listOf(filter), ScanSettings.Builder().build(), scanCallback)
-        note("Looking for a KISS TNC")
+        if (Build.VERSION.SDK_INT < 31) needed += Manifest.permission.ACCESS_FINE_LOCATION
+        val missing = needed.filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
+        if (missing.isEmpty()) radio.scanBle() else permissionLauncher.launch(missing.toTypedArray())
     }
 
     private fun sharePackage() {
         val file = File(cacheDir, "OpenUVBridge-ATAK.zip")
         file.writeBytes(BridgeCore.dataPackage())
         val uri = FileProvider.getUriForFile(this, "$packageName.files", file)
-        val share = Intent(Intent.ACTION_SEND).apply {
+        startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
             type = "application/zip"
             putExtra(Intent.EXTRA_STREAM, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        startActivity(Intent.createChooser(share, "Add to ATAK"))
-    }
-
-    private fun note(line: String) {
-        lines.add(0, line)
-        log.text = lines.take(12).joinToString("\n")
+        }, "Add to ATAK"))
     }
 }

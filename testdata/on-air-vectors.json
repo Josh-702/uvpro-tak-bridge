@@ -1,0 +1,86 @@
+{
+  "description": "Shared on-air and CoT vectors. Both the Swift and Kotlin suites must match these bytes.",
+  "timeUnix": 1700000000,
+  "position": {
+    "kissHex": "c00082a0a4a64040609c60868298986103f021343930332e35304e2f30373230312e3735572d54657374c0",
+    "source": "N0CALL",
+    "ssid": 0,
+    "destination": "APRS",
+    "info": "!4903.50N/07201.75W-Test",
+    "latitude": 49.05833333333333,
+    "longitude": -72.02916666666667,
+    "symbolTable": "/",
+    "symbol": "-",
+    "comment": "Test",
+    "uid": "APRS-N0CALL",
+    "cotType": "a-f-G-I",
+    "staleSeconds": 1800,
+    "txid": "rf-shared-1",
+    "cotXml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><event version=\"2.0\" uid=\"APRS-N0CALL\" type=\"a-f-G-I\" time=\"2023-11-14T22:13:20.000Z\" start=\"2023-11-14T22:13:20.000Z\" stale=\"2023-11-14T22:43:20.000Z\" how=\"m-g\"><point lat=\"49.058333\" lon=\"-72.029167\" hae=\"9999999.0\" ce=\"9999999.0\" le=\"9999999.0\"/><detail><contact callsign=\"N0CALL\"/><remarks>Test</remarks><uvbridge origin=\"rf\" sources=\"rf\" txid=\"rf-shared-1\"/></detail></event>"
+  },
+  "message": {
+    "addressee": "WA7BRM-7",
+    "body": "On the strip",
+    "id": "07",
+    "info": ":WA7BRM-7 :On the strip{07"
+  },
+  "ack": {
+    "addressee": "N0CALL",
+    "id": "07",
+    "info": ":N0CALL   :ack07"
+  },
+  "object": {
+    "name": "UVBRIDGE",
+    "latitudeDegrees": 36.0,
+    "latitudeMinutes": 9.55,
+    "longitudeDegrees": -115.0,
+    "longitudeMinutes": -8.39,
+    "comment": "Las Vegas",
+    "timestampUnix": 0,
+    "info": ";UVBRIDGE *010000z3609.55N/11508.39W-Las Vegas",
+    "uid": "APRS-OBJ-UVBRIDGE"
+  },
+  "beacon": {
+    "latitude": 36.1699,
+    "longitude": -115.1398,
+    "symbolTable": "/",
+    "symbol": "[",
+    "comment": "LV",
+    "messaging": true,
+    "info": "=3610.19N/11508.39W[LV",
+    "source": "WA7BRM",
+    "ssid": 7,
+    "path": "WIDE1-1,WIDE2-1",
+    "kissHex": "C00082A0A4A6404060AE826E84A49A6EAE92888A624062AE92888A64406303F03D333631302E31394E2F31313530382E3339575B4C56C0"
+  },
+  "chat": {
+    "from": "WA7BRM-7",
+    "fromUid": "APRS-WA7BRM-7",
+    "to": "N0CALL",
+    "toUid": "APRS-N0CALL",
+    "text": "On the strip",
+    "messageId": "07",
+    "latitude": 36.1699,
+    "longitude": -115.1398,
+    "staleSeconds": 86400,
+    "uid": "GeoChat.APRS-WA7BRM-7.APRS-N0CALL.07",
+    "cotXml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><event version=\"2.0\" uid=\"GeoChat.APRS-WA7BRM-7.APRS-N0CALL.07\" type=\"b-t-f\" time=\"2023-11-14T22:13:20.000Z\" start=\"2023-11-14T22:13:20.000Z\" stale=\"2023-11-15T22:13:20.000Z\" how=\"h-g-i-g-o\"><point lat=\"36.169900\" lon=\"-115.139800\" hae=\"9999999.0\" ce=\"9999999.0\" le=\"9999999.0\"/><detail><contact callsign=\"WA7BRM-7\"/><remarks>On the strip</remarks><__chat id=\"APRS-N0CALL\" chatroom=\"N0CALL\" senderCallsign=\"WA7BRM-7\" groupOwner=\"false\"><chatgrp id=\"APRS-N0CALL\" uid0=\"APRS-WA7BRM-7\" uid1=\"APRS-N0CALL\"/></__chat><link uid=\"APRS-WA7BRM-7\" type=\"b-t-f\" relation=\"p-p\"/><uvbridge origin=\"rf\" sources=\"rf\" txid=\"msg-APRS-WA7BRM-7-07\"/></detail></event>"
+  },
+  "mice": {
+    "destination": "S32U6T",
+    "latitude": 33.42733333333334,
+    "message": "Returning",
+    "west": true,
+    "longitudeOffset100": false
+  },
+  "symbols": {
+    "-": "a-f-G-I",
+    "[": "a-f-G-U-C-I",
+    ">": "a-f-G-E-V-C"
+  },
+  "stationUid": {
+    "base": "WA7BRM",
+    "ssid": 7,
+    "uid": "APRS-WA7BRM-7"
+  }
+}

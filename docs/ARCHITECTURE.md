@@ -60,4 +60,4 @@ Upstream TLS is for the operator's server only. Client certificates come from an
 
 ## Where the code lives
 
-`UVBridgeCore` is pure Swift: KISS, AX.25, APRS, CoT, the Part 97 guard, the mode machine, and the data-package zip. It builds on Linux. The iOS target adds Core Bluetooth, Network.framework, and Core Location. The Android app is a Kotlin client with the same loopback package, the same Part 97 refusals, and a small BLE scanner. It does not embed the Swift package.
+`UVBridgeCore` is pure Swift: KISS, AX.25, APRS, CoT, the Part 97 guard, the mode machine, and the data-package zip. It builds on Linux. The iOS target adds Core Bluetooth, Network.framework, and Core Location. The Android app is Kotlin in this same repo. It uses BLE KISS and, when that service is missing, Bluetooth Classic SPP. iOS cannot open SPP. After the bytes leave the radio they are the format in [ON-AIR-FORMAT.md](ON-AIR-FORMAT.md). `testdata/on-air-vectors.json` is loaded by both `swift test` and `./gradlew test`.
