@@ -1,0 +1,70 @@
+name: iOS
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  core:
+    name: Swift package tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Refuse committed secrets
+        run: |
+          set -euo pipefail
+          if git grep -I -n -E 'BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY' -- . ':(exclude)docs' ':(exclude)*.md'; then
+            echo "A private key is committed. Remove it and rotate it."
+            exit 1
+          fi
+      - uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.2.3"
+      - name: swift test
+        run: swift test
+
+  ios:
+    name: iOS compile and TestFlight
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate the Xcode project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+      - name: Compile the iOS app without signing
+        run: |
+          xcodebuild \
+            -project OpenUVBridge.xcodeproj \
+            -scheme OpenUVBridge \
+            -destination 'generic/platform=iOS' \
+            -configuration Release \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+      - name: See whether TestFlight secrets are configured
+        id: signing
+        env:
+          KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+        run: |
+          if [ -n "$KEY_ID" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "TestFlight secrets are not set yet. The compile above is the check. See docs/RELEASE-NO-MAC.md."
+          fi
+      - name: Upload to TestFlight
+        if: steps.signing.outputs.ready == 'true'
+        env:
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+          MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
+          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+          MATCH_GIT_TOKEN: ${{ secrets.MATCH_GIT_TOKEN }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          export MATCH_GIT_BASIC_AUTHORIZATION="$(printf 'x-access-token:%s' "$MATCH_GIT_TOKEN" | base64 | tr -d '\n')"
+          bundle install
+          bundle exec fastlane ios beta

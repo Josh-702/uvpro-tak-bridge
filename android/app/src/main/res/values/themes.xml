@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.OpenUVBridge" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/field_amber</item>
+        <item name="android:statusBarColor">@color/field_background</item>
+        <item name="android:navigationBarColor">@color/field_background</item>
+        <item name="android:windowBackground">@color/field_background</item>
+    </style>
+</resources>

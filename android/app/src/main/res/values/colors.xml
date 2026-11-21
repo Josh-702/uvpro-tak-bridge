@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="field_background">#12140F</color>
+    <color name="field_panel">#1E241A</color>
+    <color name="field_amber">#E6A23C</color>
+    <color name="field_text">#F2F0E6</color>
+</resources>

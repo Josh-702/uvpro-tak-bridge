@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Open UV Bridge</string>
+    <string name="radio_hint">On a UV-PRO, VR-N76, or GA-5WB: Menu, General Settings, KISS TNC on. Quit the radio\'s own app. The Bluetooth link is exclusive.</string>
+    <string name="itak_hint">Import the data package into ATAK or iTAK once. That loopback server stays the only entry, online and offline.</string>
+</resources>
