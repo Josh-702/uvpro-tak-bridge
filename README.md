@@ -1,10 +1,12 @@
 # Open UV Bridge
 
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](https://github.com/Josh-702/uvpro-tak-bridge/blob/main/LICENSE)
+
 Open UV Bridge is a free bridge between a Bluetooth KISS handheld and iTAK. iTAK cannot load plugins, so the app hosts a small TAK server on the phone. You import one data package. That server entry stays put when you have cell service and when you do not.
 
 It is an open alternative to a closed Android-only radio relay. It is not affiliated with TAK, iTAK, or BTECH. The working name does not lead with those marks.
 
-Josh Howard, WA7BRM (General), Las Vegas, Nevada. Apache-2.0.
+Josh Howard, WA7BRM (General), Las Vegas, Nevada. Licensed under [Apache-2.0](https://github.com/Josh-702/uvpro-tak-bridge/blob/main/LICENSE).
 
 ## What it does
 
