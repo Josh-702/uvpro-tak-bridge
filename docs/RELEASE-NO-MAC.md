@@ -99,6 +99,8 @@ Do not create a secret called `MATCH_GIT_BASIC_AUTHORIZATION`. The workflow enco
 
 The first job runs `swift test` on Linux. The second job generates the Xcode project on a Mac, compiles the app, and, because the secrets exist, creates the certificate in the private locker and uploads to TestFlight.
 
+The workflow trims spaces and line breaks off the certificates URL and token before it uses them. It then checks that the token can see the certs repo. `token rejected (401)` means the token itself was refused. `repo not found or no access (404)` means the URL is wrong or the token cannot see that private repo. If the repo has no branches yet, the workflow pushes an empty first commit on `master`, which is the branch match uses. An empty repo with no commit makes match fail even when the token is valid.
+
 Until the secrets exist, that same workflow still compiles the app with signing turned off and prints that TestFlight was skipped. That is expected.
 
 The **Android** workflow runs on its own. It uploads a debug APK as an artifact named `open-uv-bridge-debug`. On the run page, open the workflow, then **Artifacts**, and download it.
