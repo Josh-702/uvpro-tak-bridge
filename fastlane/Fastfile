@@ -55,9 +55,24 @@ platform :ios do
       git_basic_authorization: ENV.fetch("MATCH_GIT_BASIC_AUTHORIZATION"),
       git_full_name: "Open UV Bridge",
       git_user_email: "open-uv-bridge@users.noreply.github.com",
-      app_identifier: "net.wa7brm.openuvbridge",
-      team_id: ENV["APPLE_TEAM_ID"],
+      app_identifier: bundle_id,
+      team_id: ENV.fetch("APPLE_TEAM_ID"),
       api_key: api_key
+    )
+
+    profile_name = ENV["sigh_#{bundle_id}_appstore_profile-name"]
+    profile_name = lane_context[SharedValues::MATCH_PROVISIONING_PROFILE_MAPPING]&.[](bundle_id) if profile_name.to_s.empty?
+    UI.user_error!("Match did not install an App Store profile for #{bundle_id}.") if profile_name.to_s.empty?
+    UI.message("Archiving with manual signing and the match App Store profile.")
+
+    update_code_signing_settings(
+      use_automatic_signing: false,
+      path: "OpenUVBridge.xcodeproj",
+      team_id: ENV.fetch("APPLE_TEAM_ID"),
+      code_sign_identity: "Apple Distribution",
+      profile_name: profile_name,
+      targets: ["OpenUVBridge"],
+      build_configurations: ["Release"]
     )
 
     gym(
@@ -66,7 +81,17 @@ platform :ios do
       configuration: "Release",
       export_method: "app-store",
       output_directory: "build",
-      clean: true
+      clean: true,
+      codesigning_identity: "Apple Distribution",
+      export_team_id: ENV.fetch("APPLE_TEAM_ID"),
+      export_options: {
+        method: "app-store",
+        signingStyle: "manual",
+        teamID: ENV.fetch("APPLE_TEAM_ID"),
+        provisioningProfiles: {
+          bundle_id => profile_name
+        }
+      }
     )
 
     pilot(
