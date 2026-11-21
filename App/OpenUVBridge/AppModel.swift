@@ -185,50 +185,73 @@ final class AppModel: NSObject, ObservableObject, CLLocationManagerDelegate {
         ), now: Date()))
     }
 
-    func setRadioStatus(_ text: String, hint: String?) {
-        radioStatus = text
-        radioHint = hint
-    }
-
-    func setDiscovered(_ radios: [RadioAdvertisement]) {
-        discovered = radios
-    }
-
-    func radioBytes(_ data: Data) {
-        apply(engine.ingestKISS(data, now: Date()))
-    }
-
-    func radioLink(_ connected: Bool) {
-        apply(connected ? engine.radioDidConnect(now: Date()) : engine.radioDidDisconnect(now: Date()))
-    }
-
-    func localBytes(_ data: Data) {
-        apply(engine.ingestLocalBytes(data, now: Date()))
-    }
-
-    func localClientCount(_ count: Int) {
-        // The service reports transitions one client at a time.
-        if count > 0 {
-            apply(engine.localClientDidConnect(now: Date()))
-        } else {
-            apply(engine.localClientDidDisconnect(now: Date()))
+    /// Bluetooth and Network callbacks are scheduled on the main queue, but those
+    /// closures are not main-actor isolated. Enter the actor here so the UI update
+    /// stays synchronous with the callback that produced it.
+    nonisolated func setRadioStatus(_ text: String, hint: String?) {
+        MainActor.assumeIsolated {
+            self.radioStatus = text
+            self.radioHint = hint
         }
     }
 
-    func pathChanged(_ satisfied: Bool) {
-        apply(engine.setPath(satisfied: satisfied, now: Date()))
+    nonisolated func setDiscovered(_ radios: [RadioAdvertisement]) {
+        MainActor.assumeIsolated {
+            self.discovered = radios
+        }
     }
 
-    func upstreamReady() {
-        apply(engine.noteUpstreamReady(now: Date()))
+    nonisolated func radioBytes(_ data: Data) {
+        MainActor.assumeIsolated {
+            self.apply(self.engine.ingestKISS(data, now: Date()))
+        }
     }
 
-    func upstreamFailed() {
-        apply(engine.noteUpstreamFailed(now: Date()))
+    nonisolated func radioLink(_ connected: Bool) {
+        MainActor.assumeIsolated {
+            self.apply(connected ? self.engine.radioDidConnect(now: Date()) : self.engine.radioDidDisconnect(now: Date()))
+        }
     }
 
-    func upstreamBytes(_ data: Data) {
-        apply(engine.ingestUpstreamBytes(data, now: Date()))
+    nonisolated func localBytes(_ data: Data) {
+        MainActor.assumeIsolated {
+            self.apply(self.engine.ingestLocalBytes(data, now: Date()))
+        }
+    }
+
+    nonisolated func localClientCount(_ count: Int) {
+        MainActor.assumeIsolated {
+            // The service reports transitions one client at a time.
+            if count > 0 {
+                self.apply(self.engine.localClientDidConnect(now: Date()))
+            } else {
+                self.apply(self.engine.localClientDidDisconnect(now: Date()))
+            }
+        }
+    }
+
+    nonisolated func pathChanged(_ satisfied: Bool) {
+        MainActor.assumeIsolated {
+            self.apply(self.engine.setPath(satisfied: satisfied, now: Date()))
+        }
+    }
+
+    nonisolated func upstreamReady() {
+        MainActor.assumeIsolated {
+            self.apply(self.engine.noteUpstreamReady(now: Date()))
+        }
+    }
+
+    nonisolated func upstreamFailed() {
+        MainActor.assumeIsolated {
+            self.apply(self.engine.noteUpstreamFailed(now: Date()))
+        }
+    }
+
+    nonisolated func upstreamBytes(_ data: Data) {
+        MainActor.assumeIsolated {
+            self.apply(self.engine.ingestUpstreamBytes(data, now: Date()))
+        }
     }
 
     private func pullFromEngine() {
