@@ -51,6 +51,22 @@ signing_prepare() {
   signing_mask "$MATCH_GIT_TOKEN"
   signing_mask "$MATCH_GIT_BASIC_AUTHORIZATION"
   signing_mask "$MATCH_PASSWORD"
+
+  # actions/checkout installs a credential helper for this repo's GITHUB_TOKEN.
+  # That token cannot see a different private repo, and GitHub then says the
+  # certs repo was not found. An empty helper clears the helpers above it.
+  # match appends its own Authorization header after this entry.
+  export GIT_CONFIG_COUNT=1
+  export GIT_CONFIG_KEY_0=credential.helper
+  export GIT_CONFIG_VALUE_0=
+}
+
+# Git commands against the certificates repo. Never puts the token in the URL.
+signing_git() {
+  git \
+    -c credential.helper= \
+    -c "http.extraheader=Authorization: Basic ${MATCH_GIT_BASIC_AUTHORIZATION}" \
+    "$@"
 }
 
 # Remove every copy of a literal secret from one line. Quoted patterns stay

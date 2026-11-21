@@ -60,6 +60,8 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Generate the Xcode project
         run: |
           brew install xcodegen
@@ -111,5 +113,8 @@ jobs:
           # shellcheck source=scripts/ci/signing-env.sh
           source scripts/ci/signing-env.sh
           signing_prepare
+          # Drop the checkout token so match authenticates with MATCH_GIT_TOKEN.
+          git config --local --unset-all http.extraheader || true
+          git config --local --unset-all credential.helper || true
           bundle install
           bundle exec fastlane ios beta

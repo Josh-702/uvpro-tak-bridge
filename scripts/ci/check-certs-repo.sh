@@ -39,7 +39,7 @@ echo "Certificates repo URL: ${MATCH_GIT_URL}"
 body=$(mktemp)
 code="000"
 set +e
-code=$(curl -sS -L --max-time 30 -o "$body" -w "%{http_code}" \
+code=$(curl -sS --max-time 30 -o "$body" -w "%{http_code}" \
   --header "Authorization: Basic ${MATCH_GIT_BASIC_AUTHORIZATION}" \
   "${MATCH_GIT_URL}/info/refs?service=git-upload-pack")
 curl_status=$?
@@ -48,9 +48,18 @@ if [[ "$curl_status" -ne 0 || -z "$code" ]]; then
   fail "Could not reach the certificates repo (curl exit ${curl_status}). The URL host is the problem, or GitHub did not answer."
 fi
 
+# GitHub answers 401 for a private repo when the token is missing or useless,
+# and the body says which of the two it was. Do not print that body.
 case "$code" in
-  200) ;;
+  200)
+    if ! grep -q "git-upload-pack" "$body"; then
+      fail "MATCH_GIT_URL did not return a git repository. The URL is the problem, not the token."
+    fi
+    ;;
   401)
+    if grep -q "Repository not found" "$body"; then
+      fail "repo not found or no access (404). GitHub refused to show ${MATCH_GIT_URL}. The address is wrong, or this token cannot see that private repo."
+    fi
     fail "token rejected (401). MATCH_GIT_TOKEN length is ${#MATCH_GIT_TOKEN}. The token is the problem. Paste it again with no extra line, or create a new token with Contents read and write on the certs repo."
     ;;
   403)
@@ -67,12 +76,9 @@ esac
 err=$(mktemp)
 refs=$(mktemp)
 export GIT_TERMINAL_PROMPT=0
-export GIT_CONFIG_COUNT=1
-export GIT_CONFIG_KEY_0=http.extraheader
-export GIT_CONFIG_VALUE_0="Authorization: Basic ${MATCH_GIT_BASIC_AUTHORIZATION}"
 
 set +e
-git ls-remote "$MATCH_GIT_URL" >"$refs" 2>"$err"
+signing_git ls-remote "$MATCH_GIT_URL" >"$refs" 2>"$err"
 git_status=$?
 set -e
 if [[ "$git_status" -ne 0 ]]; then
@@ -92,7 +98,7 @@ if [[ ! -s "$refs" ]]; then
   git -C "$work" config user.email "open-uv-bridge@users.noreply.github.com"
   git -C "$work" commit -q --allow-empty -m "Initial commit so match can store certificates"
   set +e
-  git -C "$work" push "$MATCH_GIT_URL" HEAD:master >"$err" 2>&1
+  signing_git -C "$work" push "$MATCH_GIT_URL" HEAD:master >"$err" 2>&1
   push_status=$?
   set -e
   if [[ "$push_status" -ne 0 ]]; then
