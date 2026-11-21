@@ -31,7 +31,7 @@ Write down two things from [https://developer.apple.com/account](https://develop
 5. SKU: `openuvbridge`. User access: full.
 6. Click **Create**. You do not fill in screenshots yet.
 
-The GitHub Actions workflow also registers this bundle ID and app record if they are missing. The API key needs permission to create apps. Admin can. App Manager often cannot.
+The GitHub Actions workflow registers this bundle ID and app record when they are missing. That call needs an Admin API key. An App Manager key can upload only after the app already exists.
 
 ## 3. Create an App Store Connect API key
 

@@ -20,16 +20,32 @@ platform :ios do
       is_key_content_base64: false
     )
 
+    # produce does not accept an API key. The key loaded above is already the Spaceship session.
     # match cannot make a profile until this bundle ID exists on the team.
-    produce(
-      api_key: api_key,
-      app_identifier: "net.wa7brm.openuvbridge",
-      app_name: "Open UV Bridge",
-      sku: "openuvbridge",
-      language: "English",
-      team_id: ENV["APPLE_TEAM_ID"],
-      skip_itc: false
-    )
+    bundle_id = "net.wa7brm.openuvbridge"
+    begin
+      unless Spaceship::ConnectAPI::BundleId.find(bundle_id)
+        UI.message("Registering App ID #{bundle_id}.")
+        Spaceship::ConnectAPI::BundleId.create(
+          name: "Open UV Bridge",
+          platform: "IOS",
+          identifier: bundle_id
+        )
+      end
+      unless Spaceship::ConnectAPI::App.find(bundle_id)
+        UI.message("Creating the App Store Connect app for #{bundle_id}.")
+        Spaceship::ConnectAPI::App.create(
+          name: "Open UV Bridge",
+          version_string: "0.1.0",
+          sku: "openuvbridge",
+          primary_locale: "en-US",
+          bundle_id: bundle_id,
+          platforms: ["IOS"]
+        )
+      end
+    rescue => error
+      UI.user_error!("Could not register #{bundle_id}. #{error.message} An Admin API key can create an app. An App Manager key can only use an App ID that already exists. Create it at App Store Connect with bundle ID #{bundle_id}, name Open UV Bridge, and SKU openuvbridge.")
+    end
 
     match(
       type: "appstore",
