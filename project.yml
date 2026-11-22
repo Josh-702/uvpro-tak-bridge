@@ -8,7 +8,7 @@ options:
 settings:
   SWIFT_VERSION: "5.9"
   MARKETING_VERSION: "0.1.0"
-  CURRENT_PROJECT_VERSION: "3"
+  CURRENT_PROJECT_VERSION: "4"
 packages:
   UVBridgeCore:
     path: .
@@ -36,7 +36,7 @@ targets:
         DEVELOPMENT_TEAM: ""
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "3"
+        CURRENT_PROJECT_VERSION: "4"
         SUPPORTS_MACCATALYST: NO
     scheme:
       gatherCoverageData: false

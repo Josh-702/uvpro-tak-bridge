@@ -147,7 +147,10 @@ public enum TAKPackageImport {
             if let location = firstEntry(named: "caLocation0", in: text) ?? firstEntry(named: "caLocation", in: text) {
                 trust = certificates.first(where: { location.hasSuffix($0.name) || $0.name.hasSuffix(location) })?.data ?? trust
             }
-            if let location = firstEntry(named: "certificateLocation0", in: text) ?? firstEntry(named: "certificateLocation", in: text) {
+            if let location = firstEntry(named: "certificateLocation0", in: text)
+                ?? firstEntry(named: "certificateLocation", in: text)
+                ?? firstEntry(named: "clientLocation0", in: text)
+                ?? firstEntry(named: "clientLocation", in: text) {
                 client = certificates.first(where: { location.hasSuffix($0.name) || $0.name.hasSuffix(location) })?.data ?? client
             }
         }

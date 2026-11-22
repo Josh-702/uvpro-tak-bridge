@@ -313,6 +313,16 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(omitted.resolvedClientPassword, TAKPackageImport.defaultCertificatePassword)
         XCTAssertFalse(omitted.redactedDescription.contains(TAKPackageImport.defaultCertificatePassword))
 
+        let clientLocation = """
+        <entry key="connectString0" class="class java.lang.String">tak.example.org:8089:ssl</entry>
+        <entry key="clientLocation0" class="class java.lang.String">certs/client.p12</entry>
+        """
+        let located = try TAKPackageImport.load(ZipArchive.archive([
+            "prefs/cot_streams.pref": Data(clientLocation.utf8),
+            "certs/client.p12": Data([0x0C]),
+        ]))
+        XCTAssertEqual(located.clientCertificate, Data([0x0C]))
+
         XCTAssertThrowsError(try TAKPackageImport.load(ZipArchive.archive(["readme.txt": Data("no server".utf8)]))) { error in
             XCTAssertEqual(error as? TAKImportError, .noConnectString)
         }

@@ -68,14 +68,29 @@ enum TAKPKCS12 {
         var certificates: [SecCertificate]
     }
 
-    /// `nil` means the password was not accepted or the store had no certificates.
-    static func unlock(_ data: Data, password: String) -> Unlocked? {
+    enum ImportFailure: Equatable {
+        case wrongPassword
+        case unsupportedFormat(OSStatus)
+    }
+
+    enum ImportResult {
+        case unlocked(Unlocked)
+        case failed(ImportFailure)
+    }
+
+    /// A wrong password is only `errSecAuthFailed`. RC2-40 stores from `openssl -legacy`
+    /// come back as a decode or format error, which is not a password problem.
+    static func unlock(_ data: Data, password: String) -> ImportResult {
         let options = [kSecImportExportPassphrase as String: password] as CFDictionary
         var raw: CFArray?
-        guard SecPKCS12Import(data as CFData, options, &raw) == errSecSuccess,
-              let items = raw as? [[String: Any]],
-              !items.isEmpty
-        else { return nil }
+        let status = SecPKCS12Import(data as CFData, options, &raw)
+        guard status == errSecSuccess, let items = raw as? [[String: Any]], !items.isEmpty else {
+            if status == errSecAuthFailed {
+                return .failed(.wrongPassword)
+            }
+            print("PKCS12 import OSStatus \(status)")
+            return .failed(.unsupportedFormat(status))
+        }
 
         var identity: SecIdentity?
         var certificates: [SecCertificate] = []
@@ -93,8 +108,10 @@ enum TAKPKCS12 {
                 certificates = [certificate]
             }
         }
-        guard identity != nil || !certificates.isEmpty else { return nil }
-        return Unlocked(identity: identity, certificates: certificates)
+        guard identity != nil || !certificates.isEmpty else {
+            return .failed(.unsupportedFormat(errSecDecode))
+        }
+        return .unlocked(Unlocked(identity: identity, certificates: certificates))
     }
 }
 

@@ -170,16 +170,21 @@ final class AppModel: NSObject, ObservableObject, CLLocationManagerDelegate {
             forgetCertificateFiles()
             storePackage(imported)
             importNote = imported.redactedDescription
-            if !applyStoredCertificates(
+            switch applyStoredCertificates(
                 clientPassword: imported.resolvedClientPassword,
                 trustPassword: imported.resolvedTrustStorePassword
             ) {
+            case .ready:
+                needsCertificatePassword = false
+                certificatePassword = ""
+            case .wrongPassword:
                 needsCertificatePassword = true
                 upstreamLink = .passwordNeeded
                 importNote = "The certificate password was not accepted. Enter the password from the data package."
-            } else {
+            case .unsupportedFormat(let status):
                 needsCertificatePassword = false
-                certificatePassword = ""
+                upstreamLink = .noCertificate
+                importNote = "Certificate format not supported (OSStatus \(status)). iOS cannot import RC2 packages from openssl -legacy. Re-export with -certpbe PBE-SHA1-3DES -keypbe PBE-SHA1-3DES."
             }
             saveSettings()
         } catch {
@@ -190,15 +195,20 @@ final class AppModel: NSObject, ObservableObject, CLLocationManagerDelegate {
     func unlockCertificates() {
         let password = certificatePassword
         guard !password.isEmpty else { return }
-        if applyStoredCertificates(clientPassword: password, trustPassword: password) {
+        switch applyStoredCertificates(clientPassword: password, trustPassword: password) {
+        case .ready:
             needsCertificatePassword = false
             certificatePassword = ""
             importNote = "Certificates unlocked. Password stored in the Keychain."
             saveSettings()
-        } else {
+        case .wrongPassword:
             needsCertificatePassword = true
             upstreamLink = .passwordNeeded
             importNote = "That password did not unlock the certificates."
+        case .unsupportedFormat(let status):
+            needsCertificatePassword = false
+            upstreamLink = .noCertificate
+            importNote = "Certificate format not supported (OSStatus \(status)). iOS cannot import RC2 packages from openssl -legacy. Re-export with -certpbe PBE-SHA1-3DES -keypbe PBE-SHA1-3DES."
         }
     }
 
@@ -321,17 +331,22 @@ final class AppModel: NSObject, ObservableObject, CLLocationManagerDelegate {
     }
 
     private func restoreCertificates() {
-        guard applyStoredCertificates(
+        switch applyStoredCertificates(
             clientPassword: TAKCredentialStore.loadPassword(account: TAKCredentialStore.clientPassword) ?? "",
             trustPassword: TAKCredentialStore.loadPassword(account: TAKCredentialStore.trustStorePassword) ?? ""
-        ) else {
+        ) {
+        case .ready:
+            needsCertificatePassword = false
+        case .wrongPassword:
             if TAKCredentialStore.load(account: TAKCredentialStore.clientCertificate) != nil {
                 needsCertificatePassword = true
                 upstreamLink = .passwordNeeded
             }
-            return
+        case .unsupportedFormat(let status):
+            needsCertificatePassword = false
+            upstreamLink = .noCertificate
+            importNote = "Certificate format not supported (OSStatus \(status))."
         }
-        needsCertificatePassword = false
     }
 
     private func storePackage(_ imported: ImportedTAKServer) {
@@ -343,33 +358,47 @@ final class AppModel: NSObject, ObservableObject, CLLocationManagerDelegate {
         }
     }
 
-    @discardableResult
-    private func applyStoredCertificates(clientPassword: String, trustPassword: String) -> Bool {
+    private enum CertificateUnlock {
+        case ready
+        case wrongPassword
+        case unsupportedFormat(OSStatus)
+    }
+
+    private func applyStoredCertificates(clientPassword: String, trustPassword: String) -> CertificateUnlock {
         let clientData = TAKCredentialStore.load(account: TAKCredentialStore.clientCertificate)
         let trustData = TAKCredentialStore.load(account: TAKCredentialStore.trustStore)
         guard clientData != nil || trustData != nil else {
             upstream.use(nil)
-            return true
+            return .ready
         }
         guard let clientData else {
             upstream.use(nil)
-            return false
+            return .wrongPassword
         }
-        guard let unlockedClient = TAKPKCS12.unlock(clientData, password: clientPassword),
-              let identity = unlockedClient.identity
-        else {
+        let unlockedClient = TAKPKCS12.unlock(clientData, password: clientPassword)
+        let identity: SecIdentity
+        switch unlockedClient {
+        case .unlocked(let unlocked):
+            guard let found = unlocked.identity else {
+                upstream.use(nil)
+                return .unsupportedFormat(errSecDecode)
+            }
+            identity = found
+        case .failed(let failure):
             upstream.use(nil)
-            return false
+            return failure == .wrongPassword ? .wrongPassword : .unsupportedFormat(statusCode(failure))
         }
         _ = TAKCredentialStore.savePassword(account: TAKCredentialStore.clientPassword, password: clientPassword)
         var anchors: [SecCertificate] = []
         if let trustData {
-            guard let unlockedTrust = TAKPKCS12.unlock(trustData, password: trustPassword) else {
+            switch TAKPKCS12.unlock(trustData, password: trustPassword) {
+            case .unlocked(let unlocked):
+                anchors = unlocked.certificates
+                _ = TAKCredentialStore.savePassword(account: TAKCredentialStore.trustStorePassword, password: trustPassword)
+            case .failed(let failure):
                 upstream.use(nil)
-                return false
+                return failure == .wrongPassword ? .wrongPassword : .unsupportedFormat(statusCode(failure))
             }
-            anchors = unlockedTrust.certificates
-            _ = TAKCredentialStore.savePassword(account: TAKCredentialStore.trustStorePassword, password: trustPassword)
         }
         if anchors.isEmpty {
             var certificate: SecCertificate?
@@ -379,10 +408,15 @@ final class AppModel: NSObject, ObservableObject, CLLocationManagerDelegate {
         }
         guard !anchors.isEmpty else {
             upstream.use(nil)
-            return false
+            return .unsupportedFormat(errSecDecode)
         }
         upstream.use(TAKTLSMaterial(identity: identity, anchors: anchors))
-        return true
+        return .ready
+    }
+
+    private func statusCode(_ failure: TAKPKCS12.ImportFailure) -> OSStatus {
+        if case .unsupportedFormat(let status) = failure { return status }
+        return errSecAuthFailed
     }
 
     private var settingsBody: Data?
