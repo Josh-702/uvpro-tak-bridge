@@ -80,8 +80,8 @@ enum TAKPKCS12 {
         var identity: SecIdentity?
         var certificates: [SecCertificate] = []
         for item in items {
-            if let found = item[kSecImportItemIdentity as String] as? SecIdentity {
-                identity = found
+            if let found = item[kSecImportItemIdentity as String], CFGetTypeID(found as CFTypeRef) == SecIdentityGetTypeID() {
+                identity = found as! SecIdentity
             }
             if let chain = item[kSecImportItemCertChain as String] as? [SecCertificate] {
                 certificates.append(contentsOf: chain)
