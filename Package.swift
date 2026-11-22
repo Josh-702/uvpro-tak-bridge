@@ -10,11 +10,11 @@ let package = Package(
         .macOS(.v13),
         .iOS(.v17),
     ],
-    dependencies: [
-        .package(url: "https://github.com/apple/swift-crypto.git", from: "3.12.0"),
-    ],
     products: [
         .library(name: "UVBridgeCore", targets: ["UVBridgeCore"]),
+    ],
+    dependencies: [
+        .package(url: "https://github.com/apple/swift-crypto.git", from: "3.12.0"),
     ],
     targets: [
         .target(
