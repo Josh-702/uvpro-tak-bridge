@@ -66,6 +66,8 @@ public struct TXCandidate: Equatable {
     public var callsign: String
     public var ssid: Int
     public var payloadIsEncrypted: Bool
+    /// Set only for a team-mode transmission after the operator accepted the emergency warning.
+    public var emergencyEncryptionAuthorized: Bool
     public var isThirdParty: Bool
     public var isOperatorTraffic: Bool
     public var messageCharacters: Int?
@@ -78,6 +80,7 @@ public struct TXCandidate: Equatable {
         callsign: String,
         ssid: Int = 0,
         payloadIsEncrypted: Bool = false,
+        emergencyEncryptionAuthorized: Bool = false,
         isThirdParty: Bool = false,
         isOperatorTraffic: Bool = true,
         messageCharacters: Int? = nil,
@@ -89,6 +92,7 @@ public struct TXCandidate: Equatable {
         self.callsign = callsign
         self.ssid = ssid
         self.payloadIsEncrypted = payloadIsEncrypted
+        self.emergencyEncryptionAuthorized = emergencyEncryptionAuthorized
         self.isThirdParty = isThirdParty
         self.isOperatorTraffic = isOperatorTraffic
         self.messageCharacters = messageCharacters
@@ -112,8 +116,12 @@ public enum Part97Guard {
         guard Callsign.isValidBase(trimmed), (0...15).contains(candidate.ssid) else {
             return .refuse(.invalidCallsign)
         }
-        // Hard refuse. UVBridgeCore.radioEncryptionAvailable stays false; this is the backstop.
-        if candidate.payloadIsEncrypted || UVBridgeCore.radioEncryptionAvailable {
+        // Ordinary amateur transmissions stay in the clear. The emergency flag is a
+        // separate operator decision and is refused everywhere else.
+        if candidate.payloadIsEncrypted && !candidate.emergencyEncryptionAuthorized {
+            return .refuse(.encryptionNotAllowed)
+        }
+        if UVBridgeCore.radioEncryptionAvailable {
             return .refuse(.encryptionNotAllowed)
         }
         if candidate.isMicEEmergency && !policy.allowMicEEmergency {

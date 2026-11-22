@@ -74,6 +74,10 @@ public struct BridgeConfig: Codable, Equatable {
     public var symbol: String
     public var path: String
     public var comment: String
+    public var operatingMode: OperatingMode
+    public var teamChannelMegahertz: Double?
+    public var emergencyEncryption: Bool
+    public var rosterCallsigns: [String]
     public var beaconEnabled: Bool
     public var beaconFormat: BeaconFormat
     public var smartBeacon: SmartBeaconConfig
@@ -90,8 +94,12 @@ public struct BridgeConfig: Codable, Equatable {
         ssid: Int = 0,
         symbolTable: String = "/",
         symbol: String = "[",
-        path: String = "WIDE1-1,WIDE2-1",
+        path: String = "",
         comment: String = "",
+        operatingMode: OperatingMode = .team,
+        teamChannelMegahertz: Double? = nil,
+        emergencyEncryption: Bool = false,
+        rosterCallsigns: [String] = [],
         beaconEnabled: Bool = true,
         beaconFormat: BeaconFormat = .uncompressed,
         smartBeacon: SmartBeaconConfig = SmartBeaconConfig(),
@@ -109,6 +117,10 @@ public struct BridgeConfig: Codable, Equatable {
         self.symbol = symbol
         self.path = path
         self.comment = comment
+        self.operatingMode = operatingMode
+        self.teamChannelMegahertz = teamChannelMegahertz
+        self.emergencyEncryption = emergencyEncryption
+        self.rosterCallsigns = rosterCallsigns
         self.beaconEnabled = beaconEnabled
         self.beaconFormat = beaconFormat
         self.smartBeacon = smartBeacon
@@ -119,6 +131,67 @@ public struct BridgeConfig: Codable, Equatable {
         self.objectStale = objectStale
         self.chatStale = chatStale
         self.localEndpoint = localEndpoint
+    }
+}
+
+extension BridgeConfig {
+    private enum CodingKeys: String, CodingKey {
+        case callsign, ssid, symbolTable, symbol, path, comment, beaconEnabled, beaconFormat
+        case smartBeacon, part97, upstream, mirrorAllServerStations, positionStale, objectStale
+        case chatStale, localEndpoint, operatingMode, teamChannelMegahertz, emergencyEncryption, rosterCallsigns
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        callsign = try c.decode(String.self, forKey: .callsign)
+        ssid = try c.decode(Int.self, forKey: .ssid)
+        symbolTable = try c.decode(String.self, forKey: .symbolTable)
+        symbol = try c.decode(String.self, forKey: .symbol)
+        comment = try c.decode(String.self, forKey: .comment)
+        beaconEnabled = try c.decode(Bool.self, forKey: .beaconEnabled)
+        beaconFormat = try c.decode(BeaconFormat.self, forKey: .beaconFormat)
+        smartBeacon = try c.decode(SmartBeaconConfig.self, forKey: .smartBeacon)
+        part97 = try c.decode(Part97Policy.self, forKey: .part97)
+        upstream = try c.decodeIfPresent(UpstreamConfig.self, forKey: .upstream)
+        mirrorAllServerStations = try c.decode(Bool.self, forKey: .mirrorAllServerStations)
+        positionStale = try c.decode(TimeInterval.self, forKey: .positionStale)
+        objectStale = try c.decode(TimeInterval.self, forKey: .objectStale)
+        chatStale = try c.decode(TimeInterval.self, forKey: .chatStale)
+        localEndpoint = try c.decode(LocalTAKEndpoint.self, forKey: .localEndpoint)
+        if c.contains(.operatingMode) {
+            operatingMode = try c.decode(OperatingMode.self, forKey: .operatingMode)
+            path = try c.decode(String.self, forKey: .path)
+        } else {
+            operatingMode = .team
+            path = ""
+        }
+        teamChannelMegahertz = try c.decodeIfPresent(Double.self, forKey: .teamChannelMegahertz) ?? nil
+        emergencyEncryption = try c.decodeIfPresent(Bool.self, forKey: .emergencyEncryption) ?? false
+        rosterCallsigns = try c.decodeIfPresent([String].self, forKey: .rosterCallsigns) ?? []
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(callsign, forKey: .callsign)
+        try c.encode(ssid, forKey: .ssid)
+        try c.encode(symbolTable, forKey: .symbolTable)
+        try c.encode(symbol, forKey: .symbol)
+        try c.encode(path, forKey: .path)
+        try c.encode(comment, forKey: .comment)
+        try c.encode(beaconEnabled, forKey: .beaconEnabled)
+        try c.encode(beaconFormat, forKey: .beaconFormat)
+        try c.encode(smartBeacon, forKey: .smartBeacon)
+        try c.encode(part97, forKey: .part97)
+        try c.encodeIfPresent(upstream, forKey: .upstream)
+        try c.encode(mirrorAllServerStations, forKey: .mirrorAllServerStations)
+        try c.encode(positionStale, forKey: .positionStale)
+        try c.encode(objectStale, forKey: .objectStale)
+        try c.encode(chatStale, forKey: .chatStale)
+        try c.encode(localEndpoint, forKey: .localEndpoint)
+        try c.encode(operatingMode, forKey: .operatingMode)
+        try c.encodeIfPresent(teamChannelMegahertz, forKey: .teamChannelMegahertz)
+        try c.encode(emergencyEncryption, forKey: .emergencyEncryption)
+        try c.encode(rosterCallsigns, forKey: .rosterCallsigns)
     }
 }
 
@@ -287,6 +360,7 @@ public struct BridgeEffect: Equatable {
 public final class BridgeEngine {
     private let lock = NSLock()
     private var storedConfig: BridgeConfig
+    private var storedKeys: [TeamKey] = []
     private var storedMode: LinkMode = .offline
     private var pathUp = false
     private var upstreamUp = false
@@ -326,6 +400,12 @@ public final class BridgeEngine {
     public var config: BridgeConfig {
         get { locked { storedConfig } }
         set { locked { storedConfig = newValue; recomputeModeLocked() } }
+    }
+
+    /// Current key first, then keys kept so a rotated packet still opens.
+    public var emergencyKeys: [TeamKey] {
+        get { locked { storedKeys } }
+        set { locked { storedKeys = newValue } }
     }
 
     public var mode: LinkMode { locked { storedMode } }
@@ -422,7 +502,7 @@ public final class BridgeEngine {
             clock = now
             var effect = BridgeEffect()
             for frame in kissDecoder.append(data) where frame.isData {
-                guard let ax = AX25Frame.decode(frame.payload) else {
+                guard var ax = AX25Frame.decode(frame.payload) else {
                     logLocked("rx", "Undecoded KISS payload \(frame.payload.count) bytes", now)
                     continue
                 }
@@ -570,7 +650,21 @@ public final class BridgeEngine {
             logLocked("rx", "Ignored non-UI frame from \(frame.source.display)", now)
             return
         }
+        var frame = frame
+        if EmergencyFrame.isSealed(frame.info) {
+            guard storedConfig.operatingMode == .team,
+                  let opened = EmergencyFrame.open(sealed: frame.info, keys: storedKeys)
+            else {
+                logLocked("note", "Dropped an encrypted packet this team key could not open", now)
+                return
+            }
+            frame.info = opened
+        }
         let packet = APRS.parseHeard(frame: frame, now: now)
+        if storedConfig.operatingMode == .team && !TeamPolicy.rosterAllows(packet.source.display, roster: storedConfig.rosterCallsigns) {
+            logLocked("note", "Dropped a packet from outside the team roster", now)
+            return
+        }
         logLocked("rx", packet.summary, now)
         if isOperatorLocked(base: packet.source.call, ssid: packet.source.ssid) && !packet.thirdParty {
             logLocked("note", "Ignored our own station \(packet.source.display)", now)
@@ -788,9 +882,14 @@ public final class BridgeEngine {
             return
         }
         guard event.isAtom else { return }
+        if storedConfig.operatingMode == .team, event.bridge != nil, let base = TeamPolicy.baseCallsign(event.callsign),
+           !storedConfig.rosterCallsigns.contains(base) {
+            storedConfig.rosterCallsigns.append(base)
+        }
         if isOperatorCallsignLocked(event.callsign) { return }
         let alreadyRF = stationsByUID[event.uid]?.sources.contains(.rf) == true
-        guard alreadyRF || storedConfig.mirrorAllServerStations else { return }
+        let teamMember = storedConfig.operatingMode == .team && TeamPolicy.rosterAllows(event.callsign, roster: storedConfig.rosterCallsigns)
+        guard alreadyRF || storedConfig.mirrorAllServerStations || teamMember else { return }
         var station = stationsByUID[event.uid] ?? Station(uid: event.uid, callsign: event.callsign, lastHeard: now, sources: [])
         station.callsign = event.callsign.isEmpty ? station.callsign : event.callsign
         station.latitude = event.latitude
@@ -806,6 +905,10 @@ public final class BridgeEngine {
 
     private func considerBeaconLocked(now: Date, into effect: inout BridgeEffect) {
         guard storedConfig.beaconEnabled, let fix = ownFix else { return }
+        guard TeamPolicy.allowsBeacon(
+            mode: storedConfig.operatingMode,
+            teamChannelSet: storedConfig.teamChannelMegahertz != nil
+        ) else { return }
         let decision = SmartBeacon.decide(
             config: storedConfig.smartBeacon,
             now: now,
@@ -827,7 +930,11 @@ public final class BridgeEngine {
             return
         }
         radioQueue.removeAll { $0.kind == "beacon" }
-        guard let kiss = kissLocked(destination: built.destination, info: built.info) else {
+        guard let info = outgoingInfoLocked(built.info) else {
+            effect.refusals.append(TXRefusal(time: now, reason: .encryptionNotAllowed, detail: "Emergency encryption is on, but there is no team key."))
+            return
+        }
+        guard let kiss = kissLocked(destination: built.destination, info: info) else {
             effect.refusals.append(TXRefusal(time: now, reason: .invalidPath, detail: "The digipeater path is not valid AX.25."))
             return
         }
@@ -925,7 +1032,11 @@ public final class BridgeEngine {
             effect.refusals.append(TXRefusal(time: now, reason: .messageTooLong, detail: "Could not build the APRS payload."))
             return
         }
-        guard let kiss = kissLocked(destination: AX25Address(call: APRSBuilder.defaultToCall), info: Data(infoText.utf8)) else {
+        guard let info = outgoingInfoLocked(Data(infoText.utf8)) else {
+            effect.refusals.append(TXRefusal(time: now, reason: .encryptionNotAllowed, detail: "Emergency encryption is on, but there is no team key."))
+            return
+        }
+        guard let kiss = kissLocked(destination: AX25Address(call: APRSBuilder.defaultToCall), info: info) else {
             effect.refusals.append(TXRefusal(time: now, reason: .invalidPath, detail: "The digipeater path is not valid AX.25."))
             return
         }
@@ -944,6 +1055,14 @@ public final class BridgeEngine {
             attempts: 0
         ))
         flushRadioLocked(now: now, into: &effect)
+    }
+
+    private func outgoingInfoLocked(_ info: Data) -> Data? {
+        guard storedConfig.operatingMode == .team, storedConfig.emergencyEncryption else { return info }
+        guard let key = storedKeys.first, let sealed = EmergencyFrame.seal(plaintext: info, key: key, mode: .team, enabled: true) else {
+            return nil
+        }
+        return sealed
     }
 
     private func kissLocked(destination: AX25Address, info: Data) -> Data? {
@@ -967,10 +1086,12 @@ public final class BridgeEngine {
                 index += 1
                 continue
             }
+            let encrypted = AX25Frame.decode(kissPayload(job.kiss)).map { EmergencyFrame.isSealed($0.info) } ?? false
             let decision = Part97Guard.evaluate(TXCandidate(
                 callsign: storedConfig.callsign,
                 ssid: storedConfig.ssid,
-                payloadIsEncrypted: false,
+                payloadIsEncrypted: encrypted,
+                emergencyEncryptionAuthorized: encrypted && storedConfig.operatingMode == .team && storedConfig.emergencyEncryption,
                 isThirdParty: job.isThirdParty,
                 isOperatorTraffic: job.isOperatorTraffic,
                 messageCharacters: job.messageCharacters,

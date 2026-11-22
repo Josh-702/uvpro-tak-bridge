@@ -212,6 +212,8 @@ final class BridgeTests: XCTestCase {
         config.callsign = callsign
         config.ssid = ssid
         config.beaconEnabled = beacon
+        config.operatingMode = .publicAPRS
+        config.path = TeamPolicy.publicDigipeaterPath
         config.upstream = UpstreamConfig(host: "example.test", port: 8089, transport: .tls)
         return config
     }

@@ -76,6 +76,30 @@ struct RadioView: View {
                         .buttonStyle(.plain)
                     }
                 }
+                if model.radioPanel.control {
+                    Text(model.radioPanel.battery).font(.headline.monospaced())
+                    Text(model.radioPanel.channel).font(.subheadline.monospaced())
+                    Text("Power \(model.radioPanel.power.rawValue)")
+                    HStack {
+                        Button("Low") { model.setRadioPower(.low) }
+                        Button("Med") { model.setRadioPower(.medium) }
+                        Button("High") { model.setRadioPower(.high) }
+                    }
+                    Stepper("Volume \(model.radioPanel.volume)", value: Binding(
+                        get: { model.radioPanel.volume },
+                        set: { model.setRadioVolume($0) }
+                    ), in: 0...15)
+                    ForEach(model.radioPanel.channels, id: \.id) { channel in
+                        Button("\(channel.id) \(channel.name) \(String(format: "%.3f", channel.receiveMHz))") {
+                            model.selectRadioChannel(channel.id)
+                        }
+                    }
+                    if model.radioPanel.callingWarning && model.operatingMode == .team {
+                        Text("This radio is on 144.390, the public APRS calling frequency.")
+                            .foregroundStyle(FieldTheme.warn)
+                    }
+                }
+                Text(OperatorHint.part97Clear).font(.footnote)
                 if !model.refusals.isEmpty {
                     Text(model.refusals.joined(separator: "\n"))
                         .font(.caption.monospaced())
@@ -185,9 +209,38 @@ struct LogView: View {
 struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
     @State private var importing = false
+    @State private var showEmergencyWarning = false
 
     var body: some View {
         Form {
+            Section("Team") {
+                Picker("Mode", selection: $model.operatingMode) {
+                    Text("Team only").tag(OperatingMode.team)
+                    Text("Public APRS").tag(OperatingMode.publicAPRS)
+                }
+                Text(OperatorHint.part97Clear).font(.footnote)
+                if model.operatingMode == .team {
+                    TextField("Team channel MHz", text: $model.teamChannel)
+                        .keyboardType(.decimalPad)
+                    TextField("Add callsign", text: $model.rosterEntry)
+                        .textInputAutocapitalization(.characters)
+                        .autocorrectionDisabled()
+                    Button("Add to roster") { model.addRosterCallsign() }
+                    Text(model.engine.config.rosterCallsigns.joined(separator: ", "))
+                        .font(.caption.monospaced())
+                    Toggle("Emergency encryption", isOn: Binding(
+                        get: { model.emergencyEncryption },
+                        set: { enabled in
+                            if enabled { showEmergencyWarning = true }
+                            else { model.setEmergencyEncryption(false) }
+                        }
+                    ))
+                    Button("New team key") { model.rotateTeamKey() }
+                    if !model.encryptionLog.isEmpty {
+                        Text(model.encryptionLog).font(.caption2.monospaced())
+                    }
+                }
+            }
             Section("Operator") {
                 TextField("Callsign", text: $model.callsign)
                     .textInputAutocapitalization(.characters)
@@ -263,6 +316,18 @@ struct SettingsView: View {
         .onChange(of: model.upstreamTLS) { _, _ in model.saveSettings() }
         .onChange(of: model.mirrorServer) { _, _ in model.saveSettings() }
         .onChange(of: model.allowThirdParty) { _, _ in model.saveSettings() }
+        .onChange(of: model.operatingMode) { _, mode in
+            model.path = TeamPolicy.defaultPath(for: mode)
+            if mode != .team { model.emergencyEncryption = false }
+            model.saveSettings()
+        }
+        .onChange(of: model.teamChannel) { _, _ in model.saveSettings() }
+        .alert("Emergency encryption", isPresented: $showEmergencyWarning) {
+            Button("Enable", role: .destructive) { model.setEmergencyEncryption(true) }
+            Button("Cancel", role: .cancel) { model.emergencyEncryption = false }
+        } message: {
+            Text(OperatorHint.emergencyEncryptionWarning)
+        }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.zip]) { result in
             guard case .success(let url) = result else { return }
             let accessed = url.startAccessingSecurityScopedResource()

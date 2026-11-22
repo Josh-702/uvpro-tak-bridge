@@ -12,6 +12,8 @@ final class RadioSession: NSObject, CBCentralManagerDelegate, CBPeripheralDelega
     private var central: CBCentralManager?
     private var peripheral: CBPeripheral?
     private var tx: CBCharacteristic?
+    private var controlTX: CBCharacteristic?
+    private var pendingControl: [Data] = []
     private var connectedAt: Date?
     private var seen: [UUID: RadioAdvertisement] = [:]
     private let restoreID = "net.wa7brm.openuvbridge.central"
@@ -87,7 +89,10 @@ final class RadioSession: NSObject, CBCentralManagerDelegate, CBPeripheralDelega
         connectedAt = Date()
         owner?.setRadioStatus("Connected to \(peripheral.name ?? "radio")", hint: nil)
         owner?.radioLink(true)
-        peripheral.discoverServices([CBUUID(string: BLEKISS.serviceUUID)])
+        peripheral.discoverServices([
+            CBUUID(string: BLEKISS.serviceUUID),
+            CBUUID(string: BenshiLink.serviceUUID),
+        ])
     }
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
@@ -105,14 +110,22 @@ final class RadioSession: NSObject, CBCentralManagerDelegate, CBPeripheralDelega
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
-        guard let service = peripheral.services?.first(where: { $0.uuid == CBUUID(string: BLEKISS.serviceUUID) }) else {
+        let kiss = peripheral.services?.first { $0.uuid == CBUUID(string: BLEKISS.serviceUUID) }
+        let control = peripheral.services?.first { $0.uuid == CBUUID(string: BenshiLink.serviceUUID) }
+        guard let kiss else {
             owner?.setRadioStatus("This radio did not offer the KISS service", hint: OperatorHint.radioBusy)
             return
         }
         peripheral.discoverCharacteristics(
             [CBUUID(string: BLEKISS.transmitCharacteristicUUID), CBUUID(string: BLEKISS.receiveCharacteristicUUID)],
-            for: service
+            for: kiss
         )
+        if let control {
+            peripheral.discoverCharacteristics(
+                [CBUUID(string: BenshiLink.writeUUID), CBUUID(string: BenshiLink.indicateUUID)],
+                for: control
+            )
+        }
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
@@ -123,14 +136,40 @@ final class RadioSession: NSObject, CBCentralManagerDelegate, CBPeripheralDelega
             if characteristic.uuid == CBUUID(string: BLEKISS.transmitCharacteristicUUID) {
                 tx = characteristic
             }
+            if characteristic.uuid == CBUUID(string: BenshiLink.indicateUUID) {
+                peripheral.setNotifyValue(true, for: characteristic)
+            }
+            if characteristic.uuid == CBUUID(string: BenshiLink.writeUUID) {
+                controlTX = characteristic
+            }
         }
-        if tx == nil {
+        if service.uuid == CBUUID(string: BLEKISS.serviceUUID), tx == nil {
             owner?.setRadioStatus("KISS transmit characteristic missing", hint: OperatorHint.radioBusy)
         }
+        if controlTX != nil {
+            owner?.radioControlReady()
+            send(BenshiRadio.getStatusRequest())
+            send(BenshiRadio.batteryRequest())
+            send(BenshiRadio.volumeRequest())
+            for id in 0..<16 {
+                send(BenshiRadio.readChannelRequest(id))
+            }
+        }
+    }
+
+    func send(_ message: BenshiMessage) {
+        guard let peripheral, let controlTX else { return }
+        peripheral.writeValue(message.bytes, for: controlTX, type: .withResponse)
     }
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
         guard let value = characteristic.value, !value.isEmpty else { return }
+        if characteristic.uuid == CBUUID(string: BenshiLink.indicateUUID) {
+            if let message = BenshiMessage(bytes: value) {
+                owner?.radioControl(message)
+            }
+            return
+        }
         owner?.radioBytes(value)
     }
 

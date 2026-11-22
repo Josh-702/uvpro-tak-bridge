@@ -37,6 +37,12 @@ public enum OperatorHint {
 
     public static let addToITAKOnce =
         "Import this data package into iTAK once. Leave that server entry in place. Offline and online both use it, so you never reconfigure iTAK."
+
+    public static let part97Clear =
+        "Amateur radio is not encrypted here. Your callsign is sent in the clear on every transmission. 47 CFR 97.113."
+
+    public static let emergencyEncryptionWarning =
+        "Normal amateur operation prohibits encryption, 47 CFR 97.113(a)(4). In an emergency, 47 CFR 97.403 allows any means necessary for the immediate safety of life or property. You are responsible for that decision. The callsign stays in the clear. This switch does nothing in public APRS mode."
 }
 
 public enum Hex {

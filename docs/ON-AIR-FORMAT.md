@@ -14,7 +14,7 @@ A position from this app is an uncompressed APRS report, messaging capable, so i
 
 Latitude is `DDMM.mm` plus `N` or `S`. Longitude is `DDDMM.mm` plus `E` or `W`. The symbol table and symbol are the two characters around the longitude. The default symbol is `/[` (a person). The comment is plain ASCII. Course and speed, when present, are `DDD/DDD` immediately after the symbol.
 
-The destination call is `APRS`. The source is the operator's callsign and SSID. The default path is `WIDE1-1,WIDE2-1`. The shared vector's transmit frame is the KISS hex for `WA7BRM-7>APRS,WIDE1-1,WIDE2-1:=3610.19N/11508.39W[LV`. That callsign is an example in the test file, not a default. The settings field ships blank, and the Part 97 guard refuses to transmit until a real callsign is set.
+The destination call is `APRS`. The source is the operator's callsign and SSID, and that callsign stays in the clear. Team mode, the default, uses an empty digipeater path. Public APRS uses `WIDE1-1,WIDE2-1`. There is no APRS-IS client. Emergency encryption, off until the operator accepts the Part 97 warning, seals only the information field with AES-256-GCM. The shared vector's transmit frame is the KISS hex for `WA7BRM-7>APRS,WIDE1-1,WIDE2-1:=3610.19N/11508.39W[LV`. That callsign is an example in the test file, not a default. The settings field ships blank, and the Part 97 guard refuses to transmit until a real callsign is set.
 
 A direct message is the standard 67-character APRS message. The addressee is padded to 9 characters:
 

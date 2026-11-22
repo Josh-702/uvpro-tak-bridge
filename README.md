@@ -13,7 +13,8 @@ Josh Howard, WA7BRM (General), Las Vegas, Nevada. Licensed under [Apache-2.0](ht
 - Connects to a UV-PRO (firmware 0.7.11 or newer) over the open BLE KISS service. The same bytes cover Mobilinkd, PicoAPRS, the Vero VR-N76, and the Radioddity GA-5WB. Android also falls back to Bluetooth Classic SPP KISS, which an iPhone cannot use. The on-air format is the same either way. See [docs/ON-AIR-FORMAT.md](docs/ON-AIR-FORMAT.md).
 - Turns APRS positions, objects, items, status, and messages into CoT for iTAK, and turns your GeoChat into APRS messages.
 - Keeps iTAK on `127.0.0.1:17747` only. Offline, APRS is radio to radio and iTAK still has a map and chat. Online, the app also bridges to the TAK server you configure, queues while it is unreachable, and dedupes stations that show up on both paths.
-- Will not transmit until you set a callsign. Nothing on the radio is encrypted. Only your own traffic goes to RF unless you turn that off. Every transmitted frame is on the log. The default path is `WIDE1-1,WIDE2-1`. The callsign field starts blank. WA7BRM-7 is an example, not a default.
+- Will not transmit until you set a callsign. Your callsign goes out in the clear on every transmission. The default mode is team only: no APRS-IS, an empty digipeater path, and RF stations that are not on the team roster are dropped. Public APRS, with `WIDE1-1,WIDE2-1`, is available and off. Emergency encryption of the payload is off until you accept the Part 97 warning. WA7BRM-7 is an example, not a default.
+- On a UV-PRO the same Bluetooth link can run KISS and the radio's control service, so the app can show channel, volume, power, and battery, and offer next/previous channel from a notification.
 
 ## Radio setup
 

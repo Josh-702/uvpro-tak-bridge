@@ -4,6 +4,7 @@
 import CoreLocation
 import Foundation
 import SwiftUI
+import UserNotifications
 import UVBridgeCore
 
 @MainActor
@@ -18,7 +19,13 @@ final class AppModel: NSObject, ObservableObject, CLLocationManagerDelegate {
     @Published var discovered: [RadioAdvertisement] = []
     @Published var callsign = ""
     @Published var ssid = 0
-    @Published var path = "WIDE1-1,WIDE2-1"
+    @Published var path = ""
+    @Published var operatingMode = OperatingMode.team
+    @Published var teamChannel = ""
+    @Published var rosterEntry = ""
+    @Published var emergencyEncryption = false
+    @Published var encryptionLog = ""
+    @Published var radioPanel = RadioPanel()
     @Published var comment = ""
     @Published var symbol = "["
     @Published var beaconEnabled = true
@@ -73,6 +80,8 @@ final class AppModel: NSObject, ObservableObject, CLLocationManagerDelegate {
         radio.start()
         localServer.start(port: engine.localEndpoint.port)
         paths.start()
+        loadTeamKeys()
+        UNUserNotificationCenter.current().delegate = self
         location.requestAlwaysAuthorization()
         location.startUpdatingLocation()
         ticker = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
@@ -93,7 +102,10 @@ final class AppModel: NSObject, ObservableObject, CLLocationManagerDelegate {
         var config = engine.config
         config.callsign = callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         config.ssid = ssid
-        config.path = path
+        config.operatingMode = operatingMode
+        config.teamChannelMegahertz = Double(teamChannel)
+        config.emergencyEncryption = emergencyEncryption && operatingMode == .team
+        config.path = operatingMode == .team ? path : (path.isEmpty ? TeamPolicy.publicDigipeaterPath : path)
         config.comment = comment
         config.symbol = symbol.isEmpty ? "[" : symbol
         config.beaconEnabled = beaconEnabled
@@ -293,7 +305,10 @@ final class AppModel: NSObject, ObservableObject, CLLocationManagerDelegate {
         let config = engine.config
         callsign = config.callsign
         ssid = config.ssid
+        operatingMode = config.operatingMode
         path = config.path
+        teamChannel = config.teamChannelMegahertz.map { String($0) } ?? ""
+        emergencyEncryption = config.emergencyEncryption
         comment = config.comment
         symbol = config.symbol
         beaconEnabled = config.beaconEnabled
@@ -370,6 +385,147 @@ final class AppModel: NSObject, ObservableObject, CLLocationManagerDelegate {
         return true
     }
 
+    private var settingsBody: Data?
+    private var channelBodies: [Int: Data] = [:]
+    private var auditURL: URL { configURL.deletingLastPathComponent().appendingPathComponent("encryption-audit.txt") }
+
+    func radioControlReady() {
+        radioPanel.control = true
+        let center = UNUserNotificationCenter.current()
+        center.requestAuthorization(options: [.alert]) { _, _ in }
+        let next = UNNotificationAction(identifier: "channel.next", title: "Next channel", options: [])
+        let previous = UNNotificationAction(identifier: "channel.previous", title: "Previous channel", options: [])
+        center.setNotificationCategories([
+            UNNotificationCategory(identifier: "radio.channel", actions: [previous, next], intentIdentifiers: []),
+        ])
+        let content = UNMutableNotificationContent()
+        content.title = "Open UV Bridge"
+        content.body = "Use Next channel or Previous channel without leaving iTAK."
+        content.categoryIdentifier = "radio.channel"
+        center.add(UNNotificationRequest(identifier: "radio.channel", content: content, trigger: nil))
+        radio.send(BenshiRadio.readSettingsRequest())
+    }
+
+    func radioControl(_ message: BenshiMessage) {
+        if let status = BenshiRadio.status(from: message) {
+            radioPanel.channel = "Channel \(status.channelID)\(status.transmitting ? " TX" : "")\(status.receiving ? " RX" : "")"
+        }
+        if let battery = BenshiRadio.batteryPercent(from: message) {
+            radioPanel.battery = "Battery \(battery)%"
+        }
+        if let volume = BenshiRadio.volume(from: message) {
+            radioPanel.volume = volume
+        }
+        if message.isReply, message.command == BenshiCommand.readSettings, message.body.count > 1 {
+            settingsBody = message.body.dropFirst()
+        }
+        if let channel = BenshiRadio.channel(from: message), message.body.count > 1 {
+            channelBodies[channel.id] = message.body.dropFirst()
+            if let index = radioPanel.channels.firstIndex(where: { $0.id == channel.id }) {
+                radioPanel.channels[index] = channel
+            } else {
+                radioPanel.channels.append(channel)
+                radioPanel.channels.sort { $0.id < $1.id }
+            }
+            radioPanel.callingWarning = radioPanel.callingWarning || TeamPolicy.isNationalAPRSCallingFrequency(megahertz: channel.receiveMHz)
+        }
+    }
+
+    func selectRadioChannel(_ id: Int) {
+        guard let settingsBody, let patched = BenshiRadio.settingSelectedChannel(id, in: settingsBody) else { return }
+        self.settingsBody = patched
+        radio.send(BenshiRadio.writeSettingsRequest(patched))
+        radioPanel.channel = "Channel \(id)"
+    }
+
+    func stepRadioChannel(_ delta: Int) {
+        let ids = radioPanel.channels.map(\.id).sorted()
+        guard !ids.isEmpty else { return }
+        let current = settingsBody.flatMap(BenshiRadio.selectedChannel(in:)) ?? ids[0]
+        let index = ids.firstIndex(of: current) ?? 0
+        selectRadioChannel(ids[(index + delta + ids.count) % ids.count])
+    }
+
+    func setRadioPower(_ power: TXPower) {
+        guard let id = settingsBody.flatMap(BenshiRadio.selectedChannel(in:)) ?? radioPanel.channels.first?.id,
+              let raw = channelBodies[id],
+              let patched = BenshiRadio.setPower(power, inChannelBody: raw)
+        else { return }
+        channelBodies[id] = patched
+        radioPanel.power = power
+        radio.send(BenshiRadio.writeChannelRequest(patched))
+    }
+
+    func setRadioVolume(_ level: Int) {
+        radioPanel.volume = level
+        radio.send(BenshiRadio.setVolumeRequest(level))
+    }
+
+    func addRosterCallsign() {
+        guard let base = TeamPolicy.baseCallsign(rosterEntry) else { return }
+        var config = engine.config
+        if !config.rosterCallsigns.contains(base) {
+            config.rosterCallsigns.append(base)
+        }
+        engine.config = config
+        rosterEntry = ""
+        saveSettings()
+    }
+
+    func setEmergencyEncryption(_ enabled: Bool) {
+        guard operatingMode == .team else {
+            emergencyEncryption = false
+            return
+        }
+        if enabled && engine.emergencyKeys.isEmpty {
+            engine.emergencyKeys = [TeamKey.generate()]
+            saveTeamKeys()
+        }
+        emergencyEncryption = enabled
+        let line = "\(ISO8601DateFormatter().string(from: Date())) \(enabled ? "enabled" : "disabled")\n"
+        encryptionLog += line
+        if let data = encryptionLog.data(using: .utf8) {
+            try? data.write(to: auditURL, options: .atomic)
+        }
+        saveSettings()
+    }
+
+    func teamKeyShareText() -> String? {
+        engine.emergencyKeys.first?.shareText
+    }
+
+    func importTeamKey(_ text: String) {
+        guard let key = TeamKey.parseShareText(text) else { return }
+        var keys = engine.emergencyKeys.filter { $0.id != key.id }
+        keys.insert(key, at: 0)
+        engine.emergencyKeys = Array(keys.prefix(4))
+        saveTeamKeys()
+    }
+
+    func rotateTeamKey() {
+        var keys = engine.emergencyKeys
+        keys.insert(TeamKey.generate(), at: 0)
+        engine.emergencyKeys = Array(keys.prefix(4))
+        saveTeamKeys()
+    }
+
+    private func loadTeamKeys() {
+        guard let data = TAKCredentialStore.load(account: "team-keys"),
+              let texts = try? JSONDecoder().decode([String].self, from: data)
+        else { return }
+        engine.emergencyKeys = texts.compactMap(TeamKey.parseShareText)
+        if let log = try? String(contentsOf: auditURL, encoding: .utf8) {
+            encryptionLog = log
+        }
+    }
+
+    private func saveTeamKeys() {
+        let texts = engine.emergencyKeys.map(\.shareText)
+        if let data = try? JSONEncoder().encode(texts) {
+            _ = TAKCredentialStore.save(account: "team-keys", data: data)
+        }
+    }
+
     private func forgetCertificateFiles() {
         let directory = configURL.deletingLastPathComponent()
         for name in ["upstream-trust.p12", "upstream-client.p12"] {
@@ -382,6 +538,30 @@ final class AppModel: NSObject, ObservableObject, CLLocationManagerDelegate {
             try? data.write(to: snapshotURL, options: .atomic)
         }
     }
+}
+
+extension AppModel: UNUserNotificationCenterDelegate {
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        let next = response.actionIdentifier == "channel.next"
+        MainActor.assumeIsolated {
+            self.stepRadioChannel(next ? 1 : -1)
+        }
+        completionHandler()
+    }
+}
+
+struct RadioPanel {
+    var battery = "Battery unknown"
+    var channel = "Channel unknown"
+    var volume = 0
+    var power = TXPower.low
+    var channels: [RadioChannel] = []
+    var callingWarning = false
+    var control = false
 }
 
 struct RadioAdvertisement: Identifiable, Equatable {
